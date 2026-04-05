@@ -83,7 +83,7 @@ echo "    Docs:       http://$(hostname):8000/docs"
 echo "============================================"
 
 # Run in foreground so SLURM tracks the process lifetime
-uvicorn main:app \
+uvicorn app.main:app \
     --host 0.0.0.0 \
     --port 8000 \
     --workers 1 \

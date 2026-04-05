@@ -21,7 +21,7 @@ from utils.face_blender import FaceBlender
 from models.garment_classifier import GarmentClassifier
 from models.identity_encoder import IdentityEncoder
 from models.vton_model import BodyReconstructionModel, ConditionalGarmentDrapingModel
-from routes import tryon_routes
+from app import tryon_routes
 
 # --- Logging Setup ---
 logging.basicConfig(level=logging.INFO)

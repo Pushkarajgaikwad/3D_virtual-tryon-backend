@@ -154,8 +154,8 @@ class IdentityEncoder(nn.Module):
             # Add batch dimension
             image_tensor = image_tensor.unsqueeze(0)  # (1, 3, 112, 112)
             
-            # Move to CPU (explicit)
-            image_tensor = image_tensor.to('cpu')
+            # Move to same device as model (dynamic)
+            image_tensor = image_tensor.to(next(self.parameters()).device)
             
             # Extract embedding without gradients
             with torch.no_grad():
