@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+logs/
+checkpoints/
+models/smpl/
+redis-stable/
+*.pth
+*.pt
+*.pkl
+*.bin
+.env
+.conda/
