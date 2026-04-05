@@ -230,6 +230,7 @@ def export_3d_model(body_mesh: Meshes,
         ValueError: If mesh data invalid or empty.
         IOError: If file writing fails.
     """
+    import numpy as np
     
     try:
         # --- 1. Validate Input Meshes ---
