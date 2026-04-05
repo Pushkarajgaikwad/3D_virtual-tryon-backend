@@ -1,0 +1,20 @@
+# --- Backend API ---
+fastapi             # High-performance API framework
+uvicorn[standard]   # ASGI server to run FastAPI
+python-multipart    # For handling file uploads (images)
+redis               # In-memory data store for job queue/status
+
+# --- Core ML/AI ---
+torch               # PyTorch: Main deep learning framework
+torchvision         # Datasets, transforms, and models for computer vision
+
+# --- 3D & Body Modeling ---
+smplx[all]          # For loading and manipulating SMPL models (includes smplh, manol, flamel)
+#pytorch3d           # Core library for 3D operations, rendering, and meshes
+trimesh             # For loading, processing, and exporting 3D meshes (e.g., .obj, .glb)
+torch_geometric    # Geometric deep learning library for graph-based models
+
+# --- Image & Data Processing ---
+numpy               # Fundamental package for scientific computing
+opencv-python-headless # OpenCV for image processing (headless version for servers)
+Pillow              # Python Imaging Library (PIL) for image handling
