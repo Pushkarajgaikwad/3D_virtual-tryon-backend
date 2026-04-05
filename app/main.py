@@ -11,16 +11,16 @@ import os
 import logging
 import torch
 
-from utils.job_queue import JobQueue
-from utils.smpl_handler import SMPLHandler
-from utils.template_manager import TemplateManager
-from utils.texture_manager import TextureManager
-from utils.texture_warp import TextureWarpEngine
-from utils.face_extractor import FaceExtractor
-from utils.face_blender import FaceBlender
-from models.garment_classifier import GarmentClassifier
-from models.identity_encoder import IdentityEncoder
-from models.vton_model import BodyReconstructionModel, ConditionalGarmentDrapingModel
+from app.utils.job_queue import JobQueue
+from app.utils.smpl_handler import SMPLHandler
+from app.utils.template_manager import TemplateManager
+from app.utils.texture_manager import TextureManager
+from app.utils.texture_warp import TextureWarpEngine
+from app.utils.face_extractor import FaceExtractor
+from app.utils.face_blender import FaceBlender
+from app.models.garment_classifier import GarmentClassifier
+from app.models.identity_encoder import IdentityEncoder
+from app.models.vton_model import BodyReconstructionModel, ConditionalGarmentDrapingModel
 from app import tryon_routes
 
 # --- Logging Setup ---
