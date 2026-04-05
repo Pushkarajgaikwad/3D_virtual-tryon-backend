@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>3D Virtual Try-On</title>
+<style>
+body {
+  font-family: Arial, sans-serif;
+  background: #f5f5f5;
+  margin: 0;
+  padding: 0;
+  color: #222;
+}
+
+.topbar {
+  background: #4f46e5;
+  color: white;
+  padding: 14px 24px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.topbar h1 { font-size: 1.2rem; margin: 0; }
+.topbar p  { font-size: 0.75rem; margin: 0; opacity: 0.8; }
+.server-badge {
+  margin-left: auto;
+  font-size: 0.75rem;
+  background: rgba(255,255,255,0.2);
+  padding: 4px 10px;
+  border-radius: 20px;
+}
+.server-badge.online  { background: rgba(52,211,153,0.3); }
+.server-badge.offline { background: rgba(248,113,113,0.3); }
+
+.page {
+  display: flex;
+  min-height: calc(100vh - 58px);
+}
+
+/* LEFT */
+.left {
+  width: 380px;
+  min-width: 320px;
+  background: white;
+  border-right: 1px solid #e5e7eb;
+  padding: 24px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: #6b7280;
+  margin-bottom: 10px;
+}
+
+/* View upload cards */
+.views {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.vcard {
+  border: 2px dashed #d1d5db;
+  border-radius: 10px;
+  aspect-ratio: 2/3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  background: #f9fafb;
+  transition: border-color 0.2s;
+  gap: 4px;
+}
+.vcard:hover { border-color: #4f46e5; background: #eef2ff; }
+.vcard.ok    { border-style: solid; border-color: #4f46e5; }
+.vcard input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+.vcard .badge {
+  position: absolute; top: 5px; left: 5px;
+  background: #4f46e5; color: white;
+  font-size: 0.55rem; font-weight: 700;
+  padding: 2px 6px; border-radius: 20px;
+  pointer-events: none;
+}
+.vcard .vi { font-size: 22px; pointer-events: none; }
+.vcard .vt { font-size: 0.62rem; color: #9ca3af; pointer-events: none; }
+.vcard img.thumb {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%; object-fit: cover;
+  border-radius: 8px; pointer-events: none;
+}
+
+/* Garment card */
+.gcard {
+  border: 2px dashed #d1d5db;
+  border-radius: 10px;
+  padding: 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  background: #f9fafb;
+  transition: border-color 0.2s;
+}
+.gcard:hover { border-color: #4f46e5; background: #eef2ff; }
+.gcard.ok    { border-style: solid; border-color: #4f46e5; }
+.gcard input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.gthumb {
+  width: 64px; height: 80px;
+  border-radius: 8px; background: #e5e7eb;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 26px; flex-shrink: 0; overflow: hidden;
+}
+.gthumb img { width: 100%; height: 100%; object-fit: cover; }
+.ginfo h4 { font-size: 0.88rem; font-weight: 600; margin: 0 0 4px; }
+.ginfo p  { font-size: 0.72rem; color: #6b7280; margin: 0; line-height: 1.4; }
+
+/* Status */
+.status {
+  display: none;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 14px;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  border: 1px solid #e5e7eb;
+}
+.status.show { display: flex; }
+.status.pending    { background: #eef2ff; border-color: #6366f1; color: #4338ca; }
+.status.processing { background: #fffbeb; border-color: #f59e0b; color: #92400e; }
+.status.done       { background: #ecfdf5; border-color: #10b981; color: #065f46; }
+.status.fail       { background: #fef2f2; border-color: #ef4444; color: #991b1b; }
+.spin {
+  width: 15px; height: 15px; flex-shrink: 0;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Button */
+.btn {
+  padding: 13px;
+  background: #4f46e5;
+  color: white;
+  border: none;
+  border-radius: 10px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  width: 100%;
+  transition: background 0.15s;
+}
+.btn:hover:not(:disabled) { background: #4338ca; }
+.btn:disabled { background: #c7d2fe; cursor: not-allowed; color: #818cf8; }
+
+.links { font-size: 0.72rem; color: #9ca3af; text-align: center; }
+.links a { color: #6366f1; text-decoration: none; }
+.links a:hover { text-decoration: underline; }
+
+/* RIGHT */
+.right {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  gap: 16px;
+  background: #f9fafb;
+}
+
+.placeholder {
+  text-align: center;
+  color: #9ca3af;
+}
+.placeholder .icon { font-size: 72px; margin-bottom: 12px; }
+.placeholder h3 { font-size: 1.1rem; color: #6b7280; margin: 0 0 8px; }
+.placeholder p  { font-size: 0.82rem; max-width: 280px; line-height: 1.6; margin: 0 auto; }
+
+.progress {
+  width: 100%; max-width: 500px;
+  height: 5px; background: #e5e7eb;
+  border-radius: 5px; overflow: hidden;
+  display: none;
+}
+.progress-bar {
+  height: 100%; width: 30%;
+  background: #4f46e5;
+  border-radius: 5px;
+  animation: slide 1.3s ease-in-out infinite;
+}
+@keyframes slide {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(380%); }
+}
+
+#result-area {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  max-width: 500px;
+}
+#model-viewer-wrap {
+  width: 100%;
+  aspect-ratio: 3/4;
+  border-radius: 12px;
+  border: 1px solid #e5e7eb;
+  background: white;
+  overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+  color: #9ca3af; font-size: 0.85rem;
+}
+#model-viewer-wrap model-viewer {
+  width: 100%; height: 100%;
+}
+.dl-link {
+  display: inline-block;
+  padding: 9px 22px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: white;
+  color: #374151;
+  font-size: 0.82rem;
+  text-decoration: none;
+  transition: border-color 0.15s;
+}
+.dl-link:hover { border-color: #4f46e5; color: #4f46e5; }
+
+@media (max-width: 680px) {
+  .page  { flex-direction: column; }
+  .left  { width: 100%; min-width: unset; border-right: none; border-bottom: 1px solid #e5e7eb; }
+}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div>
+    <h1>👗 3D Virtual Try-On</h1>
+    <p>Upload photos · Generate 3D model · Download result</p>
+  </div>
+  <span class="server-badge" id="badge">Checking…</span>
+</div>
+
+<div class="page">
+
+  <!-- LEFT PANEL -->
+  <div class="left">
+
+    <div>
+      <div class="label">Person Photos (3 views required)</div>
+      <div class="views">
+        <div class="vcard" id="fc">
+          <span class="badge">FRONT</span>
+          <input type="file" id="ff" accept="image/*" onchange="addThumb(this,'fc')">
+          <span class="vi">🧍</span><span class="vt">Front</span>
+        </div>
+        <div class="vcard" id="sc">
+          <span class="badge">SIDE</span>
+          <input type="file" id="sf" accept="image/*" onchange="addThumb(this,'sc')">
+          <span class="vi">🧍</span><span class="vt">Side</span>
+        </div>
+        <div class="vcard" id="bc">
+          <span class="badge">BACK</span>
+          <input type="file" id="bf" accept="image/*" onchange="addThumb(this,'bc')">
+          <span class="vi">🧍</span><span class="vt">Back</span>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="label">Garment Image</div>
+      <div class="gcard" id="gc">
+        <input type="file" id="gf" accept="image/*" onchange="addGarment(this)">
+        <div class="gthumb" id="gt"><span>👕</span></div>
+        <div class="ginfo">
+          <h4>Upload Garment</h4>
+          <p>Any clothing item — best on plain white background.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="status" id="st">
+      <div class="spin" id="sp"></div>
+      <span id="sm">—</span>
+    </div>
+
+    <button class="btn" id="gb" onclick="go()" disabled>Generate 3D Try-On →</button>
+
+    <div class="links">
+      <a href="/docs" target="_blank">API Docs</a> ·
+      <a href="/api/health" target="_blank">Health</a> ·
+      <a href="/weights/status" target="_blank">Weights</a>
+    </div>
+
+  </div>
+
+  <!-- RIGHT PANEL -->
+  <div class="right">
+
+    <div class="placeholder" id="ph">
+      <div class="icon">🧥</div>
+      <h3>Result appears here</h3>
+      <p>Upload 3 person photos and a garment image, then click Generate.</p>
+    </div>
+
+    <div class="progress" id="pg"><div class="progress-bar"></div></div>
+
+    <div id="result-area">
+      <div id="model-viewer-wrap">
+        <span id="mvfallback">3D viewer loading…</span>
+      </div>
+      <a class="dl-link" id="dl" href="#" download="tryon.glb">⬇ Download .glb</a>
+    </div>
+
+  </div>
+</div>
+
+<script>
+// Health check
+(function ping() {
+  fetch('/api/health', {signal: AbortSignal.timeout(4000)})
+    .then(r => r.json())
+    .then(d => {
+      var b = document.getElementById('badge');
+      b.textContent = 'Online';
+      b.className = 'server-badge online';
+    })
+    .catch(function() {
+      var b = document.getElementById('badge');
+      b.textContent = 'Offline';
+      b.className = 'server-badge offline';
+    });
+  setTimeout(ping, 15000);
+})();
+
+function addThumb(inp, cardId) {
+  var card = document.getElementById(cardId);
+  var old  = card.querySelector('img.thumb');
+  if (old) old.remove();
+  if (inp.files[0]) {
+    var img = document.createElement('img');
+    img.className = 'thumb';
+    img.src = URL.createObjectURL(inp.files[0]);
+    card.appendChild(img);
+    card.classList.add('ok');
+    card.querySelector('.vi').style.display = 'none';
+    card.querySelector('.vt').style.display = 'none';
+  }
+  checkReady();
+}
+
+function addGarment(inp) {
+  var gt   = document.getElementById('gt');
+  var card = document.getElementById('gc');
+  if (inp.files[0]) {
+    gt.innerHTML = '';
+    var img = document.createElement('img');
+    img.src = URL.createObjectURL(inp.files[0]);
+    gt.appendChild(img);
+    card.classList.add('ok');
+  }
+  checkReady();
+}
+
+function checkReady() {
+  var ok = ['ff','sf','bf','gf'].every(function(id) {
+    return document.getElementById(id).files.length > 0;
+  });
+  document.getElementById('gb').disabled = !ok;
+}
+
+function setStatus(type, msg) {
+  var st = document.getElementById('st');
+  var sp = document.getElementById('sp');
+  var sm = document.getElementById('sm');
+  st.className = 'status show ' + type;
+  sm.textContent = msg;
+  sp.style.display = (type === 'pending' || type === 'processing') ? 'block' : 'none';
+}
+
+function showProgress(on) {
+  document.getElementById('pg').style.display = on ? 'block' : 'none';
+}
+
+var poll = null;
+
+function go() {
+  var form = new FormData();
+  form.append('user_image_front', document.getElementById('ff').files[0]);
+  form.append('user_image_side',  document.getElementById('sf').files[0]);
+  form.append('user_image_back',  document.getElementById('bf').files[0]);
+  form.append('garment_image',    document.getElementById('gf').files[0]);
+
+  document.getElementById('gb').disabled = true;
+  document.getElementById('ph').style.display = 'none';
+  document.getElementById('result-area').style.display = 'none';
+  setStatus('pending', 'Submitting job…');
+  showProgress(true);
+
+  fetch('/tryon', {method: 'POST', body: form})
+    .then(function(r) {
+      if (!r.ok) return r.json().then(function(e) { throw new Error(e.detail || r.statusText); });
+      return r.json();
+    })
+    .then(function(d) {
+      setStatus('processing', 'Processing… job: ' + d.job_id.slice(0,8) + '…');
+      startPoll(d.job_id);
+    })
+    .catch(function(e) {
+      setStatus('fail', 'Error: ' + e.message);
+      showProgress(false);
+      document.getElementById('ph').style.display = 'block';
+      document.getElementById('gb').disabled = false;
+    });
+}
+
+function startPoll(jobId) {
+  if (poll) clearInterval(poll);
+  poll = setInterval(function() {
+    fetch('/result/' + jobId)
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        if (d.status === 'completed') {
+          clearInterval(poll);
+          showProgress(false);
+          setStatus('done', 'Done! 3D model ready.');
+          showResult(d.result_url);
+          document.getElementById('gb').disabled = false;
+        } else if (d.status === 'failed') {
+          clearInterval(poll);
+          showProgress(false);
+          setStatus('fail', 'Failed: ' + (d.error || 'unknown'));
+          document.getElementById('ph').style.display = 'block';
+          document.getElementById('gb').disabled = false;
+        } else {
+          setStatus('processing', 'Status: ' + d.status + '…');
+        }
+      })
+      .catch(function() {});
+  }, 2500);
+}
+
+function showResult(url) {
+  var ra = document.getElementById('result-area');
+  ra.style.display = 'flex';
+  document.getElementById('dl').href = url;
+
+  // Try to load model-viewer; fall back to download link if unavailable
+  var wrap = document.getElementById('model-viewer-wrap');
+  if (typeof customElements !== 'undefined' && customElements.get('model-viewer')) {
+    var mv = document.createElement('model-viewer');
+    mv.setAttribute('src', url);
+    mv.setAttribute('camera-controls', '');
+    mv.setAttribute('auto-rotate', '');
+    mv.setAttribute('shadow-intensity', '1');
+    wrap.innerHTML = '';
+    wrap.appendChild(mv);
+  } else {
+    wrap.innerHTML = '<p style="padding:20px;text-align:center">3D viewer unavailable.<br>Download the .glb file to view in a 3D app.</p>';
+  }
+}
+</script>
+
+<!-- Load model-viewer async — page renders fine without it -->
+<script>
+(function() {
+  var s = document.createElement('script');
+  s.type = 'module';
+  s.src = 'https://ajax.googleapis.com/ajax/libs/model-viewer/3.5.0/model-viewer.min.js';
+  document.head.appendChild(s);
+})();
+</script>
+
+</body>
+</html>

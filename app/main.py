@@ -6,6 +6,8 @@ Initializes all ML models, templates, and queue systems on startup.
 """
 
 from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 import os
 import logging
@@ -299,14 +301,34 @@ app = FastAPI(
 # Include all routes
 app.include_router(tryon_routes.router)
 
+# Serve static frontend files at /static
+_static_dir = os.path.join(os.path.dirname(__file__), "..", "static")
+if os.path.isdir(_static_dir):
+    app.mount("/static", StaticFiles(directory=_static_dir), name="static")
 
-# --- Health Check Endpoint ---
+# Serve output files (generated .glb models) at /output
+_output_dir = os.path.join(os.path.dirname(__file__), "..", "output")
+os.makedirs(_output_dir, exist_ok=True)
+app.mount("/output", StaticFiles(directory=_output_dir), name="output")
 
-@app.get("/", tags=["Health"])
+
+# --- Frontend ---
+
+@app.get("/", response_class=HTMLResponse, tags=["Frontend"])
+async def serve_frontend():
+    """Serve the main try-on UI."""
+    html_path = os.path.join(os.path.dirname(__file__), "..", "static", "index.html")
+    if os.path.exists(html_path):
+        return FileResponse(html_path, media_type="text/html")
+    return HTMLResponse("<h1>Frontend not found</h1><p>Place index.html in the static/ directory.</p>", status_code=404)
+
+
+# --- Health Check Endpoints ---
+
+@app.get("/api/health", tags=["Health"])
 async def read_root(request: Request):
     """
-    Root endpoint for health checks.
-    Confirms API is running and displays status of all subsystems.
+    JSON health check — reports status of all subsystems.
     """
     return {
         "message": "Virtual Try-On 3D API",
@@ -337,5 +359,16 @@ async def weights_status(request: Request):
 
 
 # --- Running the Server ---
-# Run with: uvicorn main:app --reload
-# Or: uvicorn main:app --host 0.0.0.0 --port 8000
+# Option 1: python run.py          (from project root)
+# Option 2: python -m app.main     (from project root)
+# Option 3: uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(
+        "app.main:app",
+        host="0.0.0.0",
+        port=8000,
+        workers=1,
+        reload=False,
+    )
