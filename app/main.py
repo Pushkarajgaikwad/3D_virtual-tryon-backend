@@ -20,6 +20,10 @@ from utils.texture_manager import TextureManager
 from utils.texture_warp import TextureWarpEngine
 from utils.face_extractor import FaceExtractor
 from utils.face_blender import FaceBlender
+from utils.openpose_handler import OpenPoseHandler
+from utils.pifuhd_handler import PIFuHDHandler
+from utils.u2net_handler import U2NetHandler
+from utils.viton_warper import VITONWarper
 from models.garment_classifier import GarmentClassifier
 from models.identity_encoder import IdentityEncoder
 from models.vton_model import BodyReconstructionModel, ConditionalGarmentDrapingModel
@@ -236,8 +240,53 @@ async def lifespan(app: FastAPI):
         logger.error(f"✗ Failed to initialize ConditionalGarmentDrapingModel: {e}")
         app.state.draping_model = None
     
+    # ── New pipeline components ──────────────────────────────────────────────
+
     try:
-        # 9. Initialize FaceExtractor (NEW)
+        # 9a. OpenPose — body keypoint detection
+        logger.info("Initializing OpenPoseHandler (18-joint body keypoints)...")
+        openpose_handler = OpenPoseHandler(device=DEVICE)
+        app.state.openpose_handler = openpose_handler
+        logger.info("✓ OpenPoseHandler initialized")
+    except Exception as e:
+        logger.warning(f"⚠ Failed to initialize OpenPoseHandler: {e}")
+        app.state.openpose_handler = None
+
+    try:
+        # 9b. PIFuHD — implicit 3-D human reconstruction
+        logger.info("Initializing PIFuHDHandler (3-D body mesh from image)...")
+        smpl_fallback = getattr(app.state, "smpl_handler", None)
+        pifuhd_handler = PIFuHDHandler(device=DEVICE, smpl_handler=smpl_fallback)
+        app.state.pifuhd_handler = pifuhd_handler
+        logger.info("✓ PIFuHDHandler initialized")
+    except Exception as e:
+        logger.error(f"✗ Failed to initialize PIFuHDHandler: {e}")
+        app.state.pifuhd_handler = None
+
+    try:
+        # 9c. U²Net — garment segmentation
+        logger.info("Initializing U2NetHandler (garment segmentation)...")
+        u2net_handler = U2NetHandler(device=DEVICE)
+        app.state.u2net_handler = u2net_handler
+        logger.info("✓ U2NetHandler initialized")
+    except Exception as e:
+        logger.warning(f"⚠ Failed to initialize U2NetHandler: {e}")
+        app.state.u2net_handler = None
+
+    try:
+        # 9d. VITON — geometric matching / garment warp
+        logger.info("Initializing VITONWarper (GMM garment warp)...")
+        viton_warper = VITONWarper(device=DEVICE)
+        app.state.viton_warper = viton_warper
+        logger.info("✓ VITONWarper initialized")
+    except Exception as e:
+        logger.warning(f"⚠ Failed to initialize VITONWarper: {e}")
+        app.state.viton_warper = None
+
+    # ── Legacy components (kept for health-check compatibility) ─────────────
+
+    try:
+        # 9e. FaceExtractor (legacy)
         logger.info("Initializing FaceExtractor for facial landmark detection...")
         face_extractor = FaceExtractor(model_selection=0)
         app.state.face_extractor = face_extractor
@@ -335,12 +384,18 @@ async def read_root(request: Request):
         "version": "2.0.0",
         "texture_quality": getattr(request.app.state, 'texture_quality', 'unknown'),
         "weights": getattr(request.app.state, 'weights_status', {}),
+        "pipeline": {
+            "openpose":   "ready" if getattr(request.app.state, "openpose_handler",  None) else "fallback",
+            "pifuhd":     "ready" if getattr(request.app.state, "pifuhd_handler",    None) else "unavailable",
+            "u2net":      "ready" if getattr(request.app.state, "u2net_handler",     None) else "fallback",
+            "viton_warper": "ready" if getattr(request.app.state, "viton_warper",    None) else "fallback",
+        },
         "status": {
             "redis": "connected" if request.app.state.job_queue else "disconnected",
             "template_manager": "ready" if request.app.state.template_manager else "unavailable",
             "texture_manager": "ready" if request.app.state.texture_manager else "unavailable",
             "texture_warp_engine": "ready" if request.app.state.texture_warp_engine else "unavailable",
-            "smpl_handler": "ready" if request.app.state.smpl_handler else "unavailable",
+            "smpl_handler": "ready (pifuhd fallback)" if request.app.state.smpl_handler else "unavailable",
             "body_model": "ready" if request.app.state.body_model else "unavailable",
             "draping_model": "ready" if request.app.state.draping_model else "unavailable",
             "classifier": "ready" if request.app.state.garment_classifier else "fallback (heuristic)",

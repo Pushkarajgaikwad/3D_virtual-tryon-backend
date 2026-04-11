@@ -29,6 +29,11 @@ class FaceExtractor:
 
         try:
             import mediapipe as mp
+            if not hasattr(mp, "solutions"):
+                raise AttributeError(
+                    "mediapipe ≥ 0.10 removed the legacy solutions API. "
+                    "Face landmark detection disabled."
+                )
             self._face_mesh = mp.solutions.face_mesh.FaceMesh(
                 static_image_mode=True,
                 max_num_faces=1,
@@ -45,7 +50,7 @@ class FaceExtractor:
                 "Install with: pip install mediapipe"
             )
         except Exception as e:
-            logger.warning(f"FaceExtractor: Failed to initialise MediaPipe: {e}")
+            logger.warning(f"FaceExtractor: MediaPipe unavailable — {e}")
 
     # ------------------------------------------------------------------
 

@@ -1,67 +1,19 @@
 # CLAUDE.md
 
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 ## Project Overview
 
-**3D Virtual Try-On Backend API** — A FastAPI REST API that takes multi-view photos of a person (front, side, back) plus a garment image and returns a textured 3D GLB model of the garment fitted to a body mesh.
+**3D Virtual Try-On Backend API** — A FastAPI REST API that takes multi-view photos of a person (front, side, back) plus a garment image and returns a textured 3D GLB model of the garment fitted to a reconstructed body mesh.
 
-The pipeline uses the SMPL body model to generate a standard T-pose mesh, removes the garment background, then projects the garment texture onto the mesh via orthographic UV mapping. No trained neural-network checkpoints are required for inference.
-
----
-
-## Tech Stack
-
-| Layer | Technology |
-|---|---|
-| API Framework | FastAPI + Uvicorn (ASGI) |
-| Deep Learning | PyTorch + TorchVision |
-| 3D Body Model | SMPL (pure-PyTorch LBS, no smplx/chumpy required) |
-| 3D Export | trimesh (GLB with PBRMaterial) |
-| Image Processing | OpenCV, Pillow |
-| Job Queue | Redis (localhost:6379) |
-| Frontend | Vanilla HTML/CSS/JS + `<model-viewer>` for GLB preview |
-
----
-
-## Repository Structure
-
+**Current inference pipeline:**
 ```
-3D_virtual-tryon-backend/
-├── run.py                          # Entry point — python run.py (port 8000)
-├── app/
-│   └── main.py                     # FastAPI app + lifespan startup
-├── routes/
-│   └── tryon_routes.py             # POST /tryon, GET /result/{job_id}
-├── models/
-│   ├── garment_classifier.py       # GarmentClassifier (ResNet-18 based)
-│   ├── identity_encoder.py         # IdentityEncoder (ResNet-18 → 512-D)
-│   ├── vton_model.py               # BodyReconstructionModel, ConditionalGarmentDrapingModel
-│   └── smpl/
-│       └── SMPL_NEUTRAL.pkl        # SMPL body model (235 MB, gitignored)
-├── utils/
-│   ├── smpl_handler.py             # Pure-PyTorch SMPL forward pass (LBS)
-│   ├── garment_processor.py        # Background removal (GrabCut + white threshold)
-│   ├── texture_projector.py        # Orthographic UV projection onto mesh
-│   ├── mesh_types.py               # Meshes shim (replaces pytorch3d)
-│   ├── job_queue.py                # Redis job queue wrapper
-│   ├── template_manager.py         # Garment template management
-│   ├── texture_manager.py          # UV texture atlas management
-│   ├── texture_warp.py             # Texture warping engine
-│   ├── face_extractor.py           # MediaPipe face landmark extraction
-│   ├── face_blender.py             # Laplacian pyramid face blending
-│   └── preprocessing.py            # Image preprocessing helpers
-├── chumpy/
-│   ├── __init__.py                 # Minimal chumpy stub (numpy-based)
-│   └── ch.py                       # Re-exports from __init__
-├── static/
-│   └── index.html                  # Frontend UI
-├── assets/
-│   ├── female_front.jpeg           # Reference test images
-│   ├── female_side.jpeg
-│   ├── female_back.jpeg
-│   └── female_top.jpeg
-├── output/                         # Generated GLB files (served at /output)
-└── requirements.txt
+Input images → OpenPose (keypoints) → PIFuHD (3D mesh)
+Garment image → U²Net (segmentation) → VITON GMM (TPS warp)
+Warped garment projected onto 3D mesh → GLB export
 ```
+
+Every stage has a graceful fallback so the server runs with zero checkpoints.
 
 ---
 
@@ -77,7 +29,8 @@ python3 run.py --port 9000  # custom port
 python3 run.py --reload     # dev mode with auto-reload
 ```
 
-Open `http://localhost:8000` for the UI, `http://localhost:8000/docs` for API docs.
+`run.py` kills any existing process on the target port before binding.  
+UI: `http://localhost:8000` | API docs: `http://localhost:8000/docs`
 
 ### Environment Variables
 
@@ -85,87 +38,93 @@ Open `http://localhost:8000` for the UI, `http://localhost:8000/docs` for API do
 |---|---|---|
 | `REDIS_HOST` | `localhost` | Redis hostname |
 | `REDIS_PORT` | `6379` | Redis port |
-| `TEXTURE_QUALITY` | `fast` | `fast` (1024px) or `high` (2048px) |
-
----
-
-## API Endpoints
-
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/` | Serves frontend (`static/index.html`) |
-| `GET` | `/api/health` | JSON subsystem status |
-| `GET` | `/weights/status` | Weight file availability |
-| `POST` | `/tryon` | Submit try-on job |
-| `GET` | `/result/{job_id}` | Poll job status / get result URL |
-| `GET` | `/output/{job_id}.glb` | Download generated GLB |
-
-**POST /tryon** accepts multipart form:
-- `user_image_front` — front view of person
-- `user_image_side` — side view of person
-- `user_image_back` — back view of person
-- `garment_image` — garment photo
-
-Returns `{ job_id, status: "pending" }`. Poll `/result/{job_id}` until `status == "completed"`, then fetch the `result_url`.
+| `TEXTURE_QUALITY` | `fast` | `fast` (1024 px) or `high` (2048 px) |
 
 ---
 
 ## Inference Pipeline
 
-`routes/tryon_routes.py` → `_inference_pipeline()`:
+`routes/tryon_routes.py` → `_inference_pipeline()` runs five sequential steps:
 
-1. **SMPL T-pose mesh** — zero betas + zero pose → 6890 vertices, 13776 faces (no checkpoints needed)
-2. **Garment background removal** — white-pixel detection (R,G,B > 230) + GrabCut refinement + morphological cleanup (`utils/garment_processor.py`)
-3. **UV projection** — orthographic projection: U = normalised X, V = 1 − normalised Y; front half (Z ≥ median Z) maps to left half of texture atlas, back to right half (`utils/texture_projector.py`)
-4. **GLB export** — trimesh with PBRMaterial (baseColorTexture, metallicFactor=0, roughnessFactor=0.8, doubleSided=True)
+1. **OpenPose** (`utils/openpose_handler.py`) — detects 18 body keypoints from the front image. Fallback chain: CNN checkpoint → MediaPipe Pose → synthetic T-pose.
 
-Output: `output/{job_id}.glb` (~300–700 KB)
+2. **PIFuHD** (`utils/pifuhd_handler.py`) — reconstructs a 3-D body mesh via pixel-aligned implicit functions (stacked hourglass encoder + occupancy MLP + marching cubes). Fallback: SMPL neutral mesh (zero betas/pose, 6890 verts / 13776 faces).
+
+3. **U²Net** (`utils/u2net_handler.py`) — segments the garment with a nested U²-structure CNN (RSU blocks). Outputs a float mask and an RGBA cut-out. Fallback: GrabCut + white-threshold (`utils/garment_processor.py`).
+
+4. **VITON GMM** (`utils/viton_warper.py`) — warps the segmented garment to fit the body using a Geometric Matching Module (VGG correlation → TPS control-point regression). Fallback: keypoint-guided `cv2.getPerspectiveTransform`.
+
+5. **Render + export** — warped garment texture is blended onto a base texture, UV-projected onto the mesh via `utils/texture_projector.py`, and exported as a GLB with `trimesh` PBRMaterial.
+
+Output: `output/{job_id}.glb` served at `/output/{job_id}.glb`.
 
 ---
 
-## SMPL Handler (`utils/smpl_handler.py`)
+## Checkpoint Paths
 
-Pure-PyTorch implementation — no smplx or chumpy dependency at runtime:
+Place trained weights here (all optional — fallbacks activate when absent):
 
-- **Chumpy stub**: injected into `sys.modules` before `pickle.load` to deserialise old `.pkl` files on Python 3.12+
-- **pkl key names**: `v_template`, `shapedirs` (6890,3,300), `posedirs` (6890,3,207), `J_regressor` (sparse→dense), `weights`, `f` (faces), `kintree_table`
-- **Forward pass**: shape blend shapes → joint regression → Rodrigues rotation → pose blend shapes → kinematic chain transforms → Linear Blend Skinning
+| File | Stage | Notes |
+|---|---|---|
+| `checkpoints/openpose_body.pth` | OpenPose CNN | VGG-19 + PAF, 18 keypoints |
+| `checkpoints/pifuhd_final.pt` | PIFuHD | Requires `scikit-image` for marching cubes |
+| `checkpoints/u2net.pth` | U²Net | ImageNet-normalised input (320×320) |
+| `checkpoints/gmm.pth` | VITON GMM | TPS warp, 5×5 control grid |
+| `models/smpl/SMPL_NEUTRAL.pkl` | SMPL (PIFuHD fallback) | 235 MB, gitignored |
+| `checkpoints/vton_body_model.pth` | BodyReconstructionModel | Legacy, unused by active pipeline |
+| `checkpoints/vton_garment_model_conditional.pth` | GarmentDrapingModel | Legacy, unused |
 
 ---
 
 ## Startup Sequence (`app/main.py`)
 
-Loads in order on server start:
-1. SMPL model path check
-2. Redis job queue
-3. TemplateManager
-4. TextureManager + TextureWarpEngine
-5. SMPLHandler ← **required** for inference
-6. GarmentClassifier (optional, falls back to heuristic)
-7. BodyReconstructionModel (no checkpoint = random weights, unused by current pipeline)
-8. ConditionalGarmentDrapingModel (same)
-9. FaceExtractor (requires `pip install mediapipe`, gracefully disabled if missing)
-10. IdentityEncoder (ResNet-18)
-11. FaceBlender (Laplacian pyramid)
+Models are loaded into `app.state` in this order:
 
-GPU is auto-detected (`cuda:0` if available, else CPU).
+1. Weight-file existence check (non-blocking)
+2. Redis `JobQueue`
+3. `TemplateManager`, `TextureManager`, `TextureWarpEngine`
+4. `SMPLHandler` (SMPL_NEUTRAL.pkl — required for PIFuHD fallback)
+5. `GarmentClassifier`, `BodyReconstructionModel`, `ConditionalGarmentDrapingModel` (legacy)
+6. **`OpenPoseHandler`** — new pipeline
+7. **`PIFuHDHandler`** — new pipeline (receives `smpl_handler` as fallback)
+8. **`U2NetHandler`** — new pipeline
+9. **`VITONWarper`** — new pipeline
+10. `FaceExtractor`, `IdentityEncoder`, `FaceBlender` (legacy face components)
+
+GPU is auto-detected (`cuda:0` if available, else CPU). Single-worker only — `app.state` is not process-safe across multiple uvicorn workers.
 
 ---
 
-## Gitignored Assets
+## API
 
-```
-models/smpl/SMPL_NEUTRAL.pkl   # 235 MB — download separately
-checkpoints/                    # .pth checkpoint files (not required for current pipeline)
-output/                         # generated GLB files
-```
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/` | Frontend (`static/index.html`) |
+| `GET` | `/api/health` | Subsystem status — includes `pipeline` block for new components |
+| `GET` | `/weights/status` | Weight file availability |
+| `POST` | `/tryon` | Submit job (multipart: `user_image_front`, `user_image_side`, `user_image_back`, `garment_image`) |
+| `GET` | `/result/{job_id}` | Poll: `pending` → `processing` → `completed`/`failed` |
+| `GET` | `/output/{job_id}.glb` | Download result |
+
+---
+
+## Key Architectural Notes
+
+**SMPL / chumpy compatibility** — `utils/smpl_handler.py` injects a minimal chumpy stub into `sys.modules` before `pickle.load` so the `.pkl` file deserialises on Python 3.12+. No `smplx` or `chumpy` package needed at runtime.
+
+**pytorch3d not used** — `utils/mesh_types.py` provides a lightweight `Meshes` shim (verts/faces lists, `join_meshes_as_scene`) that replaces the pytorch3d dependency.
+
+**Person representation for VITON** — `viton_warper.build_person_repr()` produces a 22-channel tensor: 3 (RGB) + 1 (body silhouette) + 18 (Gaussian pose heatmaps, one per OpenPose joint). This is the input to the GMM alongside the garment image.
+
+**Texture atlas layout** — `texture_projector.project_garment_onto_mesh()` classifies SMPL/PIFuHD vertices into SHIRT (y ∈ [0.48, 0.82], not hands) and SKIN regions, then builds a 3-section atlas: `[garment_front | garment_back_mirror | skin_tone]`.
+
+**Job queue** — Redis keys hold JSON with `status`, `result_url`, and `error`. TTL = 3600 s. The blocking `_inference_pipeline()` runs via `asyncio.to_thread` so it does not block the event loop.
 
 ---
 
 ## Known Issues / Notes
 
-- **Python 3.14**: chumpy cannot be installed; the inline `sys.modules` stub in `smpl_handler.py` handles this transparently
-- **pytorch3d**: not used; replaced by `utils/mesh_types.py` shim
-- **checkpoints/**: directory missing triggers a CRITICAL log warning but does NOT prevent startup or inference — the current pipeline skips the neural draping models entirely
-- **mediapipe**: optional; face landmark extraction is disabled gracefully if not installed
-- Single-worker only (`--workers 1`). ML models are loaded into `app.state` and are not process-safe across multiple workers.
+- `checkpoints/` directory missing triggers a CRITICAL log warning but does **not** prevent startup — all four pipeline stages fall back gracefully.
+- `mediapipe` is optional; install it (`pip install mediapipe`) to activate the OpenPose MediaPipe fallback.
+- `scikit-image` is required for PIFuHD marching cubes — without it, PIFuHD falls back to SMPL even if a checkpoint is present.
+- The `build_person_repr` body-mask heuristic (centre 60%×90% of image) is used when no explicit silhouette is provided. Replace with a real parser model for better warp quality.
